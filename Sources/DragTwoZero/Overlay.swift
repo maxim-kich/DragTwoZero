@@ -443,6 +443,7 @@ final class Overlay {
         badge.isHidden = false; presentScene()
         if fade { animate(0.10, { self.badge.animator().alphaValue = 1 }) }
     }
+    var dragHintText: String { label.stringValue }
     var dragHintFrame: CGRect? {
         guard panel.isVisible, !badge.isHidden, badge.alphaValue > 0 else { return nil }
         return cocoa(badge.frame)
@@ -454,8 +455,8 @@ final class Overlay {
         updateScreen(at: point)
         collapse(from: frame, to: point, symbol: symbol, startingInSlot: true)
     }
-    func liftSelectedTextHint(from frame: CGRect, at point: CGPoint) {
-        configureHint(text: "Selected text", symbol: "text.alignleft")
+    func liftSelectedTextHint(from frame: CGRect, at point: CGPoint, text: String) {
+        configureHint(text: text, symbol: "text.alignleft")
         updateScreen(at: point)
         collapse(from: frame, to: point, symbol: "text.alignleft", startingInSlot: true)
     }

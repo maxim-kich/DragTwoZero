@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.selectedTextGesturePrepared = true
                 self.state.prepareSelectedText()
                 self.overlay.highlight(nil)
-                self.overlay.show(at: self.pointer, text: "Drag selected text", symbol: selected.symbol, centeredOnPointer: true)
+                self.overlay.show(at: self.pointer, text: selected.payload.text, symbol: selected.symbol, centeredOnPointer: true)
                 self.reportAcceptance(stage: "selected-text-pickup", reason: "hint-ready")
             case .some(.none):
                 self.selectedTextGesturePrepared = true
@@ -183,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.captured = current
             self.reportAcceptance(stage: "selected-text-pickup", reason: "accepted")
             if CapturePreferences.bufferEnabled { self.bufferOverlay.showCaptureTarget(at: point) }
-            self.overlay.liftSelectedTextHint(from: frame, at: self.pointer)
+            self.overlay.liftSelectedTextHint(from: frame, at: self.pointer, text: current.payload.text)
             self.probe(self.pointer)
         }
     }
