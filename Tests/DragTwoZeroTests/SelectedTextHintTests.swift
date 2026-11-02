@@ -172,6 +172,88 @@ final class SelectedTextHintTests: XCTestCase {
         }
     }
 
+    func testUnavailablePickupKeepsArmedButFreshPressStillRejectsUnresolvedSelection() {
+        let revision = NSPasteboard.general.changeCount
+        var reads = 0
+        withDelegate({ _, _ in .unavailable }, source: { _, _ in
+            reads += 1
+            return SourceCaptureLookup.resolve(.unavailable, at: .zero) {
+                XCTFail("Unresolved selection cannot become a paragraph")
+                return nil
+            }
+        }) { delegate in
+            delegate.prepareSelectedTextHint(at: delegate.pointer)
+            wait { !delegate.selectedTextPickupPending }
+            XCTAssertEqual(delegate.state.phase, .armed)
+            XCTAssertFalse(delegate.selectedTextGesturePrepared)
+            wait { reads > 0 && !delegate.probing }
+            XCTAssertFalse(delegate.allowsMarquee)
+            let hoverReads = reads
+            XCTAssertTrue(delegate.handle(.leftMouseDown, event(.leftMouseDown, at: delegate.pointer)))
+            wait { delegate.pendingPress == nil }
+            XCTAssertGreaterThan(reads, hoverReads, "Press must read again without the hover cache")
+            XCTAssertEqual(delegate.state.phase, .idle)
+            XCTAssertNil(delegate.captured)
+            XCTAssertEqual(NSPasteboard.general.changeCount, revision)
+        }
+    }
+
+    func testUnavailablePickupAllowsFreshEmptySpaceMarquee() {
+        withDelegate({ _, _ in .unavailable }, source: { _, _ in
+            SourceCaptureLookup(candidate: nil, allowsMarquee: true)
+        }) { delegate in
+            CapturePreferences.multiselectEnabled = true
+            delegate.prepareSelectedTextHint(at: delegate.pointer)
+            wait { !delegate.selectedTextPickupPending }
+            XCTAssertEqual(delegate.state.phase, .armed)
+            XCTAssertFalse(delegate.selectedTextGesturePrepared)
+            XCTAssertTrue(delegate.handle(.leftMouseDown, event(.leftMouseDown, at: delegate.pointer)))
+            wait { delegate.pendingPress == nil }
+            XCTAssertEqual(delegate.state.phase, .selecting)
+            XCTAssertNil(delegate.captured)
+            XCTAssertNil(delegate.selectedTextHint)
+        }
+    }
+
+    func testTimedOutPickupStillCancelsRatherThanStartingDiscovery() {
+        var sourceReads = 0
+        withDelegate({ _, stop in
+            let end = Date().addingTimeInterval(1.2)
+            while !stop() && Date() < end { Thread.sleep(forTimeInterval: 0.01) }
+            // The resolver may return unavailable after the request expires.
+            return .unavailable
+        }, source: { _, _ in
+            sourceReads += 1
+            return SourceCaptureLookup(candidate: nil, allowsMarquee: true)
+        }) { delegate in
+            delegate.prepareSelectedTextHint(at: delegate.pointer)
+            wait { !delegate.selectedTextPickupPending }
+            XCTAssertEqual(delegate.state.phase, .idle)
+            XCTAssertEqual(sourceReads, 0)
+        }
+    }
+
+    func testLateUnavailablePickupAfterCancellationCannotRestartDiscovery() {
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        var sourceReads = 0
+        withDelegate({ _, _ in
+            entered.signal(); _ = release.wait(timeout: .now() + 1)
+            return .unavailable
+        }, source: { _, _ in
+            sourceReads += 1
+            return SourceCaptureLookup(candidate: nil, allowsMarquee: true)
+        }) { delegate in
+            delegate.prepareSelectedTextHint(at: delegate.pointer)
+            XCTAssertEqual(entered.wait(timeout: .now() + 1), .success)
+            delegate.cancel(); release.signal()
+            let end = Date().addingTimeInterval(0.15)
+            while Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
+            XCTAssertEqual(delegate.state.phase, .idle)
+            XCTAssertEqual(sourceReads, 0)
+            XCTAssertNil(delegate.captured)
+        }
+    }
+
     func testNoSelectionKeepsOrdinaryBlockCaptureAvailable() {
         var block = selection("Ordinary block")
         block.selectedTextRange = nil; block.textFrames = nil

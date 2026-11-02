@@ -159,7 +159,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .some(.none):
                 self.selectedTextGesturePrepared = true
                 self.startHoverDiscovery(at: self.pointer)
-            case .unavailable, nil:
+            case .some(.unavailable):
+                // Pickup is only a hint lookup, not proof that the pointer has
+                // no selection. Keep source selection checks enabled: hover and
+                // a fresh press must still reject unresolved text, and only a
+                // known empty point may start marquee selection.
+                self.selectedTextGesturePrepared = false
+                self.reportAcceptance(stage: "selected-text-pickup", reason: "unavailable")
+                self.startHoverDiscovery(at: self.pointer)
+            case nil:
                 self.reportAcceptance(stage: "selected-text-pickup", reason: "unavailable")
                 self.cancel()
             }
