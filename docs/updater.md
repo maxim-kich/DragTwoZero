@@ -10,6 +10,10 @@ In **Settings → About**, choose **Check for Updates → Download & Install →
 
 Restart is blocked while a capture/selection, native drag, delivery, validation, or pending clipboard verification is active, and while Buffer holds an item, including hidden recovery content. Use or explicitly clear Buffer before restarting. State is checked again after the confirmation dialog and at termination; new capture gestures are gated once restart is authorized. Ordinary Quit is blocked while an authorized update is staged until the user restarts or cancellation finishes. Sparkle’s `.skip` response cancels the staged installer; `.dismiss` is deliberately avoided because it can install on quit. Force Quit, crashes, and system shutdown remain outside the app’s normal termination guard.
 
+After Restart confirmation, the updater captures activation intent once, pauses new input, and invalidates queued capture results before allowing Sparkle to install. It does not call Turn Off (which clears Buffer), change the saved capture preference, unregister a login item, or reset permissions. Delivery's main-thread completion acknowledgement must have settled, including clipboard restoration. An uncertain posted paste with an owned clipboard backup blocks restart until a newer copy releases that revision; the updater never forces restoration or discards the backup. Existing Buffer/gesture ownership must be resolved explicitly.
+
+The replacement consumes a one-shot receipt scoped to the bundle ID, bundle path and target version, expiring after ten minutes. It restores only activation intent and the input-interruption pause, then opens the existing Settings controller on About. The normal Accessibility, event-tap and onboarding input gates still apply; a previous input interruption still requires explicit Resume. No Buffer content, capture, clipboard payload or pending completion is persisted or replayed. Mismatched/expired receipts are discarded. Cancellation and update failure clear the receipt and release the temporary pause; preparation/termination retries retain the original intent rather than sampling temporary stopped state.
+
 The bundle identifier remains `com.maximkich.drop-to-t3`; existing preferences, app name, and permission keys are retained. `CFBundleVersion` now follows numeric `VERSION`, matching `CFBundleShortVersionString`, so Sparkle can compare successive versions. Releases must increase VERSION. Builds made before this updater used build number `1` and the browser flow; their first updater-enabled installation remains manual.
 
 ## Ordinary GitHub releases and signed feeds
@@ -70,6 +74,7 @@ The bundled privacy notice and [hosted app privacy notice](https://dragtwozero.c
 
 ```sh
 ./scripts/test-updater-local.sh success
+./scripts/test-updater-local.sh success-off
 ./scripts/test-updater-local.sh download-cancel
 ./scripts/test-updater-local.sh staged-cancel
 ./scripts/test-updater-local.sh bad-archive
@@ -79,6 +84,6 @@ The bundled privacy notice and [hosted app privacy notice](https://dragtwozero.c
 
 These scripts compile the production updater sources into a disposable native fixture under `.local/updater-MODE.XXXXXX/`. They use two versions, **9.0.1 → 9.0.2**, a unique fixture bundle ID/preferences domain, loopback HTTP with a fixture-only ATS exception, and a temporary Ed25519 key outside the repository that is deleted on exit. The production app has no local-feed override or ATS exception. A local Apple Development identity is required. Confirmation responses and transfer/Buffer states are scripted in the fixture; the real Sparkle framework verifies, replaces, and relaunches the fixture app. The installed Drag 2.0 app and its preferences are untouched.
 
-Evidence includes lifecycle events, archive/feed, signing/build logs, and the old/replaced fixture bundle. Failure cases must retain 9.0.1; success must launch 9.0.2 with the existing test setting and disabled daily-check preference. Unit tests separately cover release filtering, bounded metadata reads, consent, state races, cancellation, and the app’s restart activity mapping.
+Evidence includes lifecycle events, archive/feed, signing/build logs, and the old/replaced fixture bundle. Failure cases must retain 9.0.1; success must launch 9.0.2 with the existing test setting and disabled daily-check preference. Both success modes also wait for a fake asynchronous restoration acknowledgement, temporarily report OFF, and verify that the original ON/OFF intent and input pause survive replacement in a one-shot receipt. Unit tests separately cover release filtering, bounded metadata reads, consent, state races, cancellation, and the app’s restart activity mapping.
 
 These local checks do **not** establish production GitHub/CDN delivery, Developer ID/notarized two-version replacement, fresh-machine permissions, administrator authorization prompts, behavior on macOS 13, actual cross-app transfers during an update, or human interaction with the final About UI. Those remain manual release gates.

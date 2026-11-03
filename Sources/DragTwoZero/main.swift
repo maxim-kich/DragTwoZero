@@ -801,7 +801,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     @discardableResult func prepareBufferDrag() -> Bool {
-        guard captureEnabled, !delivery.busy, !nativeBufferDrag.isActive,
+        guard !updatePaused, captureEnabled, !delivery.busy, !nativeBufferDrag.isActive,
               let item = buffer.item, bufferOverlay.targetFrame != nil else { return false }
         cancel()
         state = CaptureState(); state.modifiers(held: true); state.begin()
@@ -898,6 +898,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.bufferOverlay.endCapture()
         }
     }
+    private(set) var updatePaused = false
     var captureEnabled = UserDefaults.standard.object(forKey: "captureEnabled") as? Bool ?? true
     let powerItem = NSMenuItem(title: "Turn Off", action: nil, keyEquivalent: "")
     var timer: Timer?
@@ -914,6 +915,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DebugLog.shared.record(.action(.launched))
         AppPresentationPreferences.applyDockVisibility()
+        let updateRelaunch = UpdateRelaunch.consume()
+        if let updateRelaunch {
+            captureEnabled = updateRelaunch.intent
+            inputMonitoringSuspended = updateRelaunch.paused
+        }
         let arguments = CommandLine.arguments
         let opensOnboarding = arguments.contains("--onboarding") ||
             (!arguments.contains("--about") && !arguments.contains("--settings") &&
@@ -931,6 +937,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateChecker.shared.activity = { [weak self] in
             self?.updateActivity ?? UpdateActivity(transfer: true)
         }
+        UpdateChecker.shared.beforeRestart = { [weak self] valid, done in
+            guard let self else { done(false); return }
+            self.prepareUpdateRestart(stillAuthorized: valid, completion: done)
+        }
+        UpdateChecker.shared.abandonRestart = { [weak self] in self?.updatePaused = false }
         UpdateChecker.shared.start()
         startTap()
         refreshHealth()
@@ -939,9 +950,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.tap == nil && AXIsProcessTrusted() { self.startTap() }
             self.refreshHealth()
         }
+        // Keep onboarding's existing input gate even when reopening About.
         if opensOnboarding { showOnboarding() }
-        else if arguments.contains("--about") { showAboutFromNotification() }
-        else if arguments.contains("--settings") { openSettings() }
+        if updateRelaunch != nil { showAboutFromNotification() }
+        else if !opensOnboarding && arguments.contains("--about") { showAboutFromNotification() }
+        else if !opensOnboarding && arguments.contains("--settings") { openSettings() }
     }
 
     private func setMenuBarVisible(_ visible: Bool) {
@@ -973,6 +986,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setCaptureEnabled(inputMonitoringSuspended || !captureEnabled)
     }
     func setCaptureEnabled(_ enabled: Bool) {
+        guard !UpdateChecker.shared.restartInProgress else { return }
         let wasSuspended = inputMonitoringSuspended
         guard captureEnabled != enabled || wasSuspended else { return }
         inputMonitoringSuspended = false
@@ -1075,9 +1089,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func quit() { NSApp.terminate(nil) }
     var updateActivity: UpdateActivity {
-        UpdateActivity(transfer: dropping || validatingSource || pendingPress != nil
+        UpdateActivity(transfer: delivery.busy || dropping || validatingSource || pendingPress != nil
                        || bufferNativePress || bufferDragID != nil || nativeBufferDrag.isActive || deliveryToken != nil,
-                       selection: ![.idle, .locked].contains(state.phase), buffer: buffer.item != nil)
+                       selection: ![.idle, .locked].contains(state.phase), buffer: buffer.item != nil,
+                       clipboard: delivery.hasUnsettledClipboard, activationIntent: captureEnabled, inputPaused: inputMonitoringSuspended)
+    }
+    /// Do not use Turn Off: it clears Buffer and resets an input-interruption pause.
+    /// Transfers (including clipboard restoration) acknowledge completion via Delivery.busy.
+    func prepareUpdateRestart(stillAuthorized: @escaping () -> Bool, completion: @escaping (Bool) -> Void) {
+        guard stillAuthorized(), updateActivity.restartBlock == nil else { completion(false); return }
+        updatePaused = true
+        suspendCaptureForAppUI() // Synchronous cancellation invalidates all queued capture results.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { completion(false); return }
+            guard stillAuthorized() else { completion(false); return }
+            completion(self.updatePaused && self.updateActivity.restartBlock == nil)
+        }
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         UpdateChecker.shared.permitsTermination() ? .terminateNow : .terminateCancel
@@ -1142,7 +1169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
         // Once the user authorizes a safe restart, do not start another capture
         // between Sparkle's termination request and the application's final quit.
-        if UpdateChecker.shared.restartAuthorized { return false }
+        if updatePaused || UpdateChecker.shared.restartAuthorized { return false }
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // Respect macOS releasing the input stream. Re-enabling immediately
             // can repeatedly reclaim input during a slow or broken gesture.

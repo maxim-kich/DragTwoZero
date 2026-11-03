@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 MODE="${1:-success}"
-case "$MODE" in success|download-cancel|staged-cancel|bad-archive|bad-feed|incompatible) ;; *) echo 'Unknown fixture mode' >&2; exit 1;; esac
+case "$MODE" in success|success-off|download-cancel|staged-cancel|bad-archive|bad-feed|incompatible) ;; *) echo 'Unknown fixture mode' >&2; exit 1;; esac
 swift package resolve
 ROOT=$(mktemp -d "$PWD/.local/updater-${MODE}.XXXXXX")
 KEY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/drag2-updater-key.XXXXXX")
@@ -123,7 +123,7 @@ done
 test -f "$ROOT/events.txt" && rg -q '^SUCCESS' "$ROOT/events.txt" || { cat "$ROOT/process.log"; echo "Fixture failed; evidence: $ROOT" >&2; exit 1; }
 sleep 1
 ACTUAL=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$OLD_APP/Contents/Info.plist")
-if [ "$MODE" = success ]; then test "$ACTUAL" = 9.0.2; else test "$ACTUAL" = 9.0.1; fi
+if [[ "$MODE" = success || "$MODE" = success-off ]]; then test "$ACTUAL" = 9.0.2; else test "$ACTUAL" = 9.0.1; fi
 codesign --verify --deep --strict "$OLD_APP"
 cat "$ROOT/events.txt"
 printf 'Evidence: %s\n' "$ROOT"

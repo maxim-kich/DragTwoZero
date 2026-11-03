@@ -2,6 +2,10 @@ import AppKit
 
 final class Delivery {
     private(set) var busy = false
+    // Main-owned acknowledgement of an uncertain posted paste. Do not discard
+    // its only backup during an update; a newer clipboard revision releases it.
+    private var unsettledClipboard: CaptureClipboard?
+    var hasUnsettledClipboard: Bool { unsettledClipboard?.needsRestoration == true }
     // Only one transaction can be admitted by the main-owned busy flag. Remote
     // AX and promised clipboard data never run on the event-tap/rendering loop.
     private let queue = DispatchQueue(label: "capture.delivery", qos: .userInitiated)
@@ -199,6 +203,8 @@ final class Delivery {
                 if let clipboard {
                     clipboard.finish(confirmed: confirmed)
                     unconfirmedClipboard = !confirmed && clipboard.isCurrent ? clipboard : nil
+                    let unsettled = unconfirmedClipboard
+                    DispatchQueue.main.async { self.unsettledClipboard = unsettled }
                 }
                 finish(confirmed)
             }

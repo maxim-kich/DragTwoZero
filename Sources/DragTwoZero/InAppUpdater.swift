@@ -21,11 +21,38 @@ struct UpdateActivity {
     var transfer = false
     var selection = false
     var buffer = false
+    var clipboard = false
+    var activationIntent = false
+    var inputPaused = false
     var restartBlock: String? {
+        if clipboard { return "Copy something new before restarting to release the pending paste." }
         if transfer { return "Finish or cancel the active transfer before restarting." }
         if selection { return "Finish or cancel the current capture before restarting." }
         if buffer { return "Use or explicitly clear the Buffer content before restarting." }
         return nil
+    }
+}
+
+/// Only activation intent crosses replacement. Never serialize Buffer or pending work.
+enum UpdateRelaunch {
+    static let key = "updateRelaunchOnce"
+    static func save(_ intent: Bool, paused: Bool, version: String, defaults: UserDefaults, bundle: Bundle, now: Date = Date()) {
+        defaults.set(["intent": intent, "paused": paused, "version": version,
+                      "path": bundle.bundleURL.standardizedFileURL.path, "bundle": bundle.bundleIdentifier ?? "",
+                      "expires": now.addingTimeInterval(600).timeIntervalSince1970], forKey: key)
+        defaults.synchronize()
+    }
+    static func clear(_ defaults: UserDefaults) { defaults.removeObject(forKey: key); defaults.synchronize() }
+    static func consume(defaults: UserDefaults = .standard, bundle: Bundle = .main, now: Date = Date()) -> (intent: Bool, paused: Bool)? {
+        let receipt = defaults.dictionary(forKey: key)
+        clear(defaults)
+        guard let receipt, receipt["path"] as? String == bundle.bundleURL.standardizedFileURL.path,
+              receipt["bundle"] as? String == bundle.bundleIdentifier ?? "",
+              receipt["version"] as? String == bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              let expires = receipt["expires"] as? Double, expires > now.timeIntervalSince1970,
+              expires <= now.addingTimeInterval(600).timeIntervalSince1970,
+              let intent = receipt["intent"] as? Bool, let paused = receipt["paused"] as? Bool else { return nil }
+        return (intent, paused)
     }
 }
 
@@ -34,11 +61,16 @@ struct UpdateActivity {
 final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNotificationCenterDelegate {
     static let shared = UpdateChecker()
     static let changed = Notification.Name("DragUpdateStateChanged")
-    enum Phase { case idle, checking, available, downloading, extracting, ready, installing, cancelling }
+    enum Phase { case idle, checking, available, downloading, extracting, ready, preparing, installing, cancelling }
     private(set) var phase: Phase = .idle
     private(set) var message = "Check for a newer version."
     private(set) var release: ReleaseUpdate?
     var activity: () -> UpdateActivity = { UpdateActivity(transfer: true) } // Fail closed until attached to the app.
+    var beforeRestart: (@escaping () -> Bool, @escaping (Bool) -> Void) -> Void = { _, done in done(false) }
+    var abandonRestart: () -> Void = {}
+    private var originalIntent: (enabled: Bool, paused: Bool)?
+    private var preparation = UUID()
+    var restartInProgress: Bool { phase == .preparing || phase == .installing }
     private(set) var restartAuthorized = false
     private(set) var failureCode: Int?
     private(set) var failureCodes: [Int] = []
@@ -80,7 +112,7 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
         return alert.runModal() == .alertFirstButtonReturn
     }
     var checking: Bool { phase == .checking }
-    var hasUpdate: Bool { [.available, .downloading, .extracting, .ready, .installing, .cancelling].contains(phase) }
+    var hasUpdate: Bool { [.available, .downloading, .extracting, .ready, .preparing, .installing, .cancelling].contains(phase) }
     var primaryTitle: String {
         switch phase {
         case .idle: return "Check for Updates"
@@ -89,12 +121,13 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
         case .downloading: return "Downloading…"
         case .extracting: return "Verifying…"
         case .ready: return "Restart"
+        case .preparing: return "Stopping…"
         case .installing: return retryTermination == nil ? "Restarting…" : "Restart"
         case .cancelling: return "Cancelling…"
         }
     }
-    var primaryEnabled: Bool { (phase == .idle && updater?.sessionInProgress != true) || [.available, .ready].contains(phase) || retryTermination != nil }
-    var canCancel: Bool { [.checking, .available, .downloading, .extracting, .ready].contains(phase) && !cancelRequested }
+    var primaryEnabled: Bool { (phase == .idle && updater?.sessionInProgress != true) || [.available, .ready].contains(phase) || (phase == .installing && retryTermination != nil) }
+    var canCancel: Bool { [.checking, .available, .downloading, .extracting, .ready, .preparing].contains(phase) && !cancelRequested }
     var automaticChecks: Bool {
         get { defaults.object(forKey: "checkForUpdates") as? Bool ?? true }
         set {
@@ -202,16 +235,37 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
                   choice != nil || retryTermination != nil else { return }
             // The modal dialog pumps the run loop: read real state again after consent.
             if let reason = activity().restartBlock { message = reason; broadcast(); return }
-            restartAuthorized = true; self.choice = nil; retryTermination = nil
-            set(.installing, "Installing and restarting…")
-            action()
+            if originalIntent == nil {
+                let current = activity()
+                originalIntent = (current.activationIntent, current.inputPaused)
+            }
+            let previousPhase = phase
+            let token = UUID(); preparation = token
+            restartAuthorized = false
+            UpdateRelaunch.clear(defaults)
+            set(.preparing, "Stopping safely before restarting…")
+            beforeRestart({ [weak self] in
+                self?.preparation == token && self?.phase == .preparing && self?.cancelRequested == false
+            }) { [weak self] success in
+                guard let self, self.preparation == token, self.phase == .preparing, !self.cancelRequested else { return }
+                guard success, self.activity().restartBlock == nil else {
+                    self.abandonRestart()
+                    self.set(previousPhase, "Could not stop safely. Try again, or cancel the update.")
+                    return
+                }
+                guard let intent = self.originalIntent, let release = self.release else { return }
+                UpdateRelaunch.save(intent.enabled, paused: intent.paused, version: release.version, defaults: self.defaults, bundle: self.bundle)
+                self.restartAuthorized = true; self.choice = nil; self.retryTermination = nil
+                self.set(.installing, "Installing and restarting…")
+                action()
+            }
         default: break
         }
     }
     func cancel() {
         guard canCancel else { return }
         cancelRequested = true; checkGeneration = UUID(); task?.cancel(); task = nil
-        restartAuthorized = false
+        clearHandoff()
         let waitForSparkle = updater?.sessionInProgress == true
         let wasExtracting = phase == .extracting
         if waitForSparkle { set(.cancelling, "Cancelling update…") }
@@ -234,10 +288,16 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
         guard downloadAuthorized else { return true }
         guard restartAuthorized, activity().restartBlock == nil else {
             restartAuthorized = false
+            UpdateRelaunch.clear(defaults)
             message = activity().restartBlock ?? "Restart or cancel the pending update before quitting."
             broadcast(); return false
         }
         return true
+    }
+    private func clearHandoff() {
+        preparation = UUID(); restartAuthorized = false; originalIntent = nil
+        UpdateRelaunch.clear(defaults)
+        abandonRestart()
     }
     private func set(_ phase: Phase, _ message: String) { self.phase = phase; self.message = message; broadcast() }
     private func broadcast() {
@@ -260,6 +320,7 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
     }
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
         choice = nil; cancellation = nil; retryTermination = nil
+        clearHandoff()
         downloadAuthorized = false; restartAuthorized = false
         release = nil
         if cancelRequested { set(.idle, "Update cancelled.") }
@@ -325,11 +386,12 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
         // Raw errors can contain filesystem paths or server payloads; keep diagnostics generic.
         failureCode = (error as NSError).code
+        clearHandoff()
         set(.cancelling, Self.failureMessage(error)); acknowledgement()
     }
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         self.cancellation = cancellation
-        if cancelRequested || !downloadAuthorized { cancellation(); return }
+        if cancelRequested || !downloadAuthorized || phase != .downloading { cancellation(); return }
         downloadedBytes = 0
         set(.downloading, "Downloading signed update…")
     }
@@ -344,16 +406,17 @@ final class UpdateChecker: NSObject, SPUUpdaterDelegate, SPUUserDriver, UNUserNo
         }
     }
     func showDownloadDidStartExtractingUpdate() {
+        guard [.downloading, .cancelling].contains(phase) else { return }
         cancellation = nil; set(.extracting, cancelRequested ? "Cancelling after verification…" : "Verifying and preparing update…")
     }
     func showExtractionReceivedProgress(_ progress: Double) {}
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        guard !cancelRequested, downloadAuthorized else { reply(.skip); return }
+        guard !cancelRequested, downloadAuthorized, [.downloading, .extracting].contains(phase) else { reply(.skip); return }
         choice = reply; cancellation = nil
         set(.ready, activity().restartBlock ?? "Verified update ready. Restart when you’re ready.")
     }
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
-        if !applicationTerminated {
+        if !applicationTerminated, phase == .installing, downloadAuthorized, !cancelRequested {
             // A termination veto must require another explicit Restart click.
             self.retryTermination = retryTerminatingApplication
             broadcast()
