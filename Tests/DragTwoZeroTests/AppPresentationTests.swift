@@ -99,6 +99,45 @@ final class AppPresentationTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: "bufferEnabled"))
     }
 
+    @MainActor
+    func testDockRequestsSerializeAndKeepLatestChoiceWithoutReopeningWindow() {
+        _ = NSApplication.shared
+        let hidden = NSApp.activationPolicy() != .accessory
+        var requests: [Bool] = []
+        var completions: [() -> Void] = []
+        let controller = DockPresentation(transform: { requests.append($0); return true },
+                                          schedule: { completions.append($0) })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        XCTAssertTrue(controller.request(hidden: hidden, window: window))
+        XCTAssertTrue(controller.request(hidden: !hidden))
+        XCTAssertTrue(controller.request(hidden: hidden))
+        XCTAssertEqual(requests, [hidden])
+        window.close()
+        completions.removeFirst()()
+        XCTAssertEqual(requests, [hidden, hidden], "Only the latest queued request is applied")
+        XCTAssertFalse(window.isVisible, "Finishing a transition must not reopen closed Settings")
+        completions.removeFirst()()
+    }
+
+    @MainActor
+    func testFailedDockChangeRestoresWindowHidingAndCanRetry() {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.canHide = true
+        var attempts = 0
+        let controller = DockPresentation(transform: { _ in attempts += 1; return false },
+                                          schedule: { _ in XCTFail("Failed changes must not schedule a transition") })
+        let hidden = NSApp.activationPolicy() != .accessory
+        XCTAssertFalse(controller.request(hidden: hidden, window: window))
+        XCTAssertTrue(window.canHide)
+        XCTAssertFalse(controller.request(hidden: hidden, window: window))
+        XCTAssertEqual(attempts, 2)
+        XCTAssertFalse(window.isVisible)
+    }
+
     func testClosingAnyUnfinishedOnboardingStepQuitsIncludingTheLastScreen() {
         for step in 0...OnboardingSession.finalStep {
             var session = OnboardingSession()
