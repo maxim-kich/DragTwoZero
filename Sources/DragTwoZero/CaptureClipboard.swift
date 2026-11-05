@@ -97,6 +97,8 @@ final class CaptureClipboard {
         return true
     }
 
+    var needsRestoration: Bool { restoreAfterPaste && isCurrent }
+
     var isCurrent: Bool {
         guard let ownedChange, let captureID else { return false }
         let board = prepared.board
