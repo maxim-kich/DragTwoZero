@@ -6,12 +6,10 @@ import UserNotifications
 /// A local, repeatable introduction. Closing before Get Started quits the app.
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let completedKey = "onboardingCompletedV1"
-    private static let updatesStep = 5
+    private static let updatesStep = 4
     private static let finalStep = OnboardingSession.finalStep
-    private let onBufferChange: () -> Void
     private let onMenuBarVisibilityChange: (Bool) -> Void
     private let onIncompleteClose: () -> Void
-    private let bufferSwitch = NSSwitch()
     private let launchAtLoginView: LaunchAtLoginView
     private let isAccessibilityGranted: () -> Bool
     private let readNotificationAuthorization: (@escaping (UNAuthorizationStatus) -> Void) -> Void
@@ -44,8 +42,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let permissionStatus = NSTextField(labelWithString: "")
     private let accessibilitySwitch = NSSwitch()
 
-    init(onBufferChange: @escaping () -> Void = {},
-         onMenuBarVisibilityChange: @escaping (Bool) -> Void = { _ in },
+    init(onMenuBarVisibilityChange: @escaping (Bool) -> Void = { _ in },
          onIncompleteClose: @escaping () -> Void = { NSApp.terminate(nil) },
          launchAtLogin: LaunchAtLoginController = LaunchAtLoginController(),
          isAccessibilityGranted: @escaping () -> Bool = AXIsProcessTrusted,
@@ -55,7 +52,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.readNotificationAuthorization = readNotificationAuthorization
         self.isAccessibilityGranted = isAccessibilityGranted
         self.launchAtLoginView = LaunchAtLoginView(frame: NSRect(x: 0, y: 0, width: 880, height: 76), leadingInset: 62, controller: launchAtLogin)
-        self.onBufferChange = onBufferChange
         self.onMenuBarVisibilityChange = onMenuBarVisibilityChange
         self.onIncompleteClose = onIncompleteClose
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 760),
@@ -243,17 +239,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             shortcutBox.addSubview(recorder)
             shortcutRecorder = recorder
         case 4:
-            heading.stringValue = "Give your drag a place to rest"
-            detail.stringValue = "Using one screen, or need somewhere to park your drag?\nUse the optional Buffer to keep an item while you switch apps."
-            let bufferBox = row("Buffer", "Park an item, then drag it into an input when you’re ready.", symbol: "tray", y: 28)
-            bufferSwitch.frame = NSRect(x: 812, y: 26, width: 40, height: 24)
-            bufferSwitch.state = CapturePreferences.bufferEnabled ? .on : .off
-            bufferSwitch.target = self
-            bufferSwitch.action = #selector(bufferChanged(_:))
-            bufferSwitch.setAccessibilityLabel("Buffer")
-            bufferSwitch.toolTip = "Keep one item above your apps. Off by default."
-            bufferBox.addSubview(bufferSwitch)
-        case 5:
             heading.stringValue = "Hear about updates"
             detail.stringValue = "Get a notification when a new version is available.\nYou choose when to download and install it."
             let notificationBox = row("Notify about updates", "", symbol: "bell", y: 28,
@@ -356,13 +341,6 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         product.setActive(true)
         }
     }
-    @objc private func bufferChanged(_ sender: NSSwitch) {
-        let enabled = sender.state == .on
-        guard enabled != CapturePreferences.bufferEnabled else { return }
-        CapturePreferences.bufferEnabled = enabled
-        onBufferChange()
-    }
-
     @objc private func requestPermission() {
         let granted = isAccessibilityGranted()
         accessibilitySwitch.state = granted ? .on : .off

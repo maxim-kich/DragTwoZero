@@ -23,7 +23,7 @@ enum AppPresentationPreferences {
 
 /// Completion belongs to this presentation, including when replaying the guide.
 struct OnboardingSession {
-    static let finalStep = 6
+    static let finalStep = 5
     var step = 0
     private(set) var completed = false
 

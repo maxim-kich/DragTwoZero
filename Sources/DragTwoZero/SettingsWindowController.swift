@@ -25,14 +25,13 @@ private final class SettingsPageView: NSView {
 }
 
 enum SettingsSection: String, CaseIterable {
-    case general = "General", behaviour = "Behaviour", buffer = "Buffer"
+    case general = "General", behaviour = "Behaviour"
     case appearance = "Appearance", experimental = "Experimental", about = "About"
 
     var symbol: String {
         switch self {
         case .general: return "gearshape"
         case .behaviour: return "slider.horizontal.3"
-        case .buffer: return "tray"
         case .appearance: return "paintpalette"
         case .experimental: return "flask"
         case .about: return "info.circle"
@@ -150,7 +149,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         root.layoutSubtreeIfNeeded()
         let rowTop = navigation.convert(navigation.rect(ofRow: 0), to: root).maxY
         for (index, page) in pages.enumerated() {
-            guard let title = page.subviews.first as? NSTextField else { continue }
+            guard let title = page.subviews.compactMap({ $0 as? NSTextField }).first else { continue }
             let viewport = pageScrollViews[index]
             let inset = max(0, viewport.frame.maxY - rowTop)
             let titleTop = title.frame.maxY
@@ -249,8 +248,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         windowHeading.font = .systemFont(ofSize: 13, weight: .semibold)
         windowHeading.autoresizingMask = [.minYMargin]
         root.addSubview(windowHeading)
-        let general = pages[0], behaviour = pages[1], buffer = pages[2]
-        let appearance = pages[3], experimental = pages[4], about = pages[5]
+        let general = pages[0], behaviour = pages[1]
+        let appearance = pages[2], experimental = pages[3], about = pages[4]
         general.addSubview(label("General", x: 28, y: 494, width: 560, size: 24))
         let activationCard = card(NSRect(x: 24, y: 396, width: 592, height: 64))
         general.addSubview(activationCard)
@@ -316,19 +315,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         clipboardCard.contentView?.addSubview(clipboardSwitch)
         alignSettingsLabels([clipboardLabel, clipboardDetail], with: clipboardSwitch)
 
-        buffer.addSubview(label("Buffer", x: 28, y: 494, width: 560, size: 24))
-        let bufferCard = card(NSRect(x: 24, y: 396, width: 592, height: 64))
-        let bufferTitle = label("Buffer", x: 16, y: 35, width: 470)
-        let bufferDetail = label("Keep an item above your apps, then drag it into an input.", x: 16, y: 12, width: 510, size: 12, secondary: true)
-        bufferSwitch.frame = NSRect(x: 528, y: 20, width: 40, height: 24)
+        let bufferCard = card(NSRect(x: 24, y: 156, width: 592, height: 144))
+        let bufferTitle = label("Buffer", x: 16, y: 115, width: 470)
+        let bufferDetail = label("Keep an item above your apps, then drag it into an input.", x: 16, y: 92, width: 510, size: 12, secondary: true)
+        bufferSwitch.frame = NSRect(x: 528, y: 100, width: 40, height: 24)
         bufferSwitch.state = CapturePreferences.bufferEnabled ? .on : .off
         bufferSwitch.target = self; bufferSwitch.action = #selector(bufferChanged(_:))
         bufferSwitch.setAccessibilityLabel("Buffer")
         [bufferTitle, bufferDetail, bufferSwitch].forEach { bufferCard.contentView?.addSubview($0) }
         alignSettingsLabels([bufferTitle, bufferDetail], with: bufferSwitch)
-        buffer.addSubview(bufferCard)
-        let positionCard = card(NSRect(x: 24, y: 316, width: 592, height: 64))
-        buffer.addSubview(positionCard)
+        experimental.addSubview(bufferCard)
         let positionTitle = bufferPositionLabel
         positionTitle.frame = NSRect(x: 16, y: 21, width: 280, height: 20)
         bufferPositionControl.frame = NSRect(x: 416, y: 18, width: 157, height: 28)
@@ -336,8 +332,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         bufferPositionControl.selectItem(at: BufferPosition.allCases.firstIndex(of: CapturePreferences.bufferPosition) ?? 0)
         bufferPositionControl.target = self; bufferPositionControl.action = #selector(bufferPositionChanged)
         bufferPositionControl.setAccessibilityLabel("Position of buffer")
-        positionCard.contentView?.addSubview(positionTitle)
-        positionCard.contentView?.addSubview(bufferPositionControl)
+        bufferCard.contentView?.addSubview(positionTitle)
+        bufferCard.contentView?.addSubview(bufferPositionControl)
         alignSettingsLabels([positionTitle], with: bufferPositionControl)
         refreshBufferPositionAvailability()
         let dockCard = card(NSRect(x: 24, y: 52, width: 592, height: 64))

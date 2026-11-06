@@ -1030,9 +1030,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         suspendCaptureForAppUI()
         setMenuBarVisible(false)
         if onboardingWindow == nil {
-            onboardingWindow = OnboardingWindowController(onBufferChange: { [weak self] in
-                self?.bufferSettingsChanged()
-            }, onMenuBarVisibilityChange: { [weak self] visible in
+            onboardingWindow = OnboardingWindowController(onMenuBarVisibilityChange: { [weak self] visible in
                 self?.setMenuBarVisible(visible)
             })
         }
