@@ -121,7 +121,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         refreshBuffer()
         animations.refresh()
         dockIconSwitch.state = AppPresentationPreferences.hidesDockIcon() ? .on : .off
-        AppPresentationPreferences.applyDockVisibility()
+        AppPresentationPreferences.applyDockVisibility(window: window)
         refreshAccessibility()
         accessibilityTimer?.invalidate()
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -141,7 +141,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
         accessibilityTimer = nil
         showsUpdateStatus = false
         refreshUpdates()
-        AppPresentationPreferences.applyDockVisibility()
+        AppPresentationPreferences.applyDockVisibility(window: window)
     }
 
     func alignPageContentWithSidebar() {
@@ -630,8 +630,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTa
 
     @objc private func dockIconChanged(_ sender: NSSwitch) {
         DebugLog.shared.record(.action(sender.state == .on ? .dockHidden : .dockShown))
+        let previous = AppPresentationPreferences.hidesDockIcon()
         AppPresentationPreferences.setHidesDockIcon(sender.state == .on)
-        AppPresentationPreferences.applyDockVisibility()
+        if !AppPresentationPreferences.applyDockVisibility(window: window) {
+            AppPresentationPreferences.setHidesDockIcon(previous)
+            sender.state = previous ? .on : .off
+        }
     }
 
     @objc private func refreshAccessibility() {
