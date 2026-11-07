@@ -44,6 +44,24 @@ final class SelectedTextHintTests: XCTestCase {
         wait { !delegate.validatingSource }
     }
 
+    func testHintShowsSelectionBeginningWithWhitespaceCollapsedAndPreservesItOnGrab() throws {
+        let selected = selection("  First words\n\tthen more words  ")
+        var failure: Error?
+        withDelegate({ _, _ in .selected(selected) }) { delegate in
+            delegate.prepareSelectedTextHint(at: delegate.pointer)
+            wait { !delegate.selectedTextPickupPending }
+            XCTAssertEqual(delegate.overlay.dragHintText, "First words then more words")
+            do {
+                let hint = try XCTUnwrap(delegate.overlay.dragHintFrame)
+                XCTAssertTrue(delegate.handle(.leftMouseDown, event(.leftMouseDown, at: CGPoint(x: hint.midX, y: hint.midY))))
+                wait { !delegate.validatingSource }
+            } catch { failure = error; return }
+            XCTAssertEqual(delegate.overlay.dragHintText, "First words then more words")
+            XCTAssertEqual(delegate.captured?.payload.text, selected.payload.text)
+        }
+        if let failure { throw failure }
+    }
+
     func testSelectionWithoutGlyphBoundsShowsStationaryHintBeforeAnyDrag() {
         let selected = selection(), revision = NSPasteboard.general.changeCount
         withDelegate({ _, _ in .selected(selected) }) { delegate in

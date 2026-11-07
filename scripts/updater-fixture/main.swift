@@ -31,6 +31,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
             require(UserDefaults.standard.string(forKey: "fixtureSetting") == "preserved", "settings preserved")
             require(!UserDefaults.standard.bool(forKey: "checkForUpdates"), "daily preference preserved")
             require(UserDefaults.standard.object(forKey: "SUUpdateGroupIdentifier") == nil, "no installation identifier")
+            let receipt = UpdateRelaunch.consume()
+            require(receipt?.intent == (mode != "success-off"), "activation intent restored after replacement")
+            require(receipt?.paused == true, "input pause preserved")
+            require(UpdateRelaunch.consume() == nil, "relaunch receipt consumed once")
             record("SUCCESS replaced and relaunched 9.0.1 -> 9.0.2")
             NSApp.terminate(nil); return
         }
@@ -40,7 +44,21 @@ final class Fixture: NSObject, NSApplicationDelegate {
             self.record("CONFIRM " + button + " " + String(self.consent))
             return self.consent
         })
+        activity.activationIntent = mode != "success-off"
+        activity.inputPaused = true
         checker.activity = { [unowned self] in self.activity }
+        checker.beforeRestart = { [unowned self] valid, done in
+            self.require(valid(), "preparation authorized")
+            self.activity.activationIntent = false // fake stop; retry must not recapture OFF
+            self.activity.transfer = true // fake asynchronous restoration
+            self.record("STOP waiting for restoration")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self.require(!self.checker.restartAuthorized, "no installation before restoration acknowledgement")
+                self.activity.transfer = false
+                self.record("STOP restoration acknowledged")
+                done(valid())
+            }
+        }
         observer = NotificationCenter.default.addObserver(forName: UpdateChecker.changed, object: checker, queue: .main) { [weak self] _ in
             DispatchQueue.main.async { self?.advance() }
         }

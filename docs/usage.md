@@ -24,7 +24,7 @@ Change the trigger shortcut, formatting, appearance, haptics, and animations in 
 
 ## Buffer
 
-Using one screen, or need a place for your drag to rest? Enable the optional **Buffer** step in onboarding, before the updates question, or use **Settings → Buffer** to hold one item for later. Buffer is off by default.
+Using one screen, or need a place for your drag to rest? Enable **Buffer** in **Settings → Experimental** to hold one item for later. Buffer is off by default.
 
 1. Hold the trigger shortcut to reveal **Buffer**, including over empty space.
 2. Drag a captured item into its recessed slot, then release the shortcut.

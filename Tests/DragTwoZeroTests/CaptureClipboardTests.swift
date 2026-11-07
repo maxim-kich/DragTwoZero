@@ -3,6 +3,20 @@ import XCTest
 @testable import DragTwoZero
 
 final class CaptureClipboardTests: XCTestCase {
+    func testUnsettledClipboardBlocksUpdateOnlyWhileBackupIsOwned() {
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.setString("Original", forType: .string)
+        let clipboard = CaptureClipboard(text: "Pending paste", board: board)
+        clipboard.finish(confirmed: false)
+        XCTAssertTrue(clipboard.needsRestoration)
+        board.clearContents(); board.setString("Newer copy", forType: .string)
+        XCTAssertFalse(clipboard.needsRestoration)
+        clipboard.finish(confirmed: true)
+        XCTAssertEqual(board.string(forType: .string), "Newer copy")
+        let retained = CaptureClipboard(text: "Explicit overwrite", board: board, restoreAfterPaste: false)
+        XCTAssertFalse(retained.needsRestoration)
+    }
     func testRestartedAppPreservesVisibleOrphanPayloadAndAllFormats() {
         for staleMarker in [CaptureClipboard.marker, .init("com.maximkich.drop-to-t3.temporary-context")] {
             let board = NSPasteboard.withUniqueName()

@@ -131,7 +131,7 @@ final class DebugLog {
 
     private static func safe(_ fields: [String: Any]) -> Bool {
         let events: Set<String> = ["launched", "quitting", "settingsOpened", "settingsClosed", "onboardingOpened", "captureArmed", "captureResumed", "captureStopped", "dockHidden", "dockShown", "health", "inputInterrupted", "slowInputHandler", "acceptance", "update", "haptic", "backdrop"]
-        let phases: Set<String> = ["idle", "armed", "resolving", "selecting", "ready", "dragging", "locked", "checking", "available", "downloading", "extracting", "installing", "cancelling"]
+        let phases: Set<String> = ["idle", "armed", "resolving", "selecting", "ready", "dragging", "locked", "checking", "available", "downloading", "extracting", "preparing", "installing", "cancelling"]
         guard let event = fields["event"] as? String, events.contains(event) else { return false }
         for (key, value) in fields {
             switch key {
